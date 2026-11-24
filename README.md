@@ -25,12 +25,12 @@ curl -s localhost:8099/healthz | jq
 ## 接真实模型(DeepSeek)
 
 模型侧用 **[`langchain-deepseek`](https://pypi.org/project/langchain-deepseek/)** 的 `ChatDeepSeek`
-(OpenAI 兼容端点),默认模型 id:`deepseek:deepseek-v4.1-flash`(`<provider>:<model-id>` 形式)。
+(OpenAI 兼容端点),默认模型 id:`deepseek:deepseek-flash`(服务端另支持 `deepseek-v4-pro`)(`<provider>:<model-id>` 形式)。
 
 ```sh
 # .env
 DID_AI_PLANNER=langchain
-DID_AI_MODEL=deepseek:deepseek-v4.1-flash
+DID_AI_MODEL=deepseek:deepseek-flash
 DEEPSEEK_API_KEY=sk-...            # 或 DID_AI_API_KEY
 # DID_AI_BASE_URL=                 # 留空用官方端点;指向本地桩时才填
 ```

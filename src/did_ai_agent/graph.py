@@ -30,6 +30,16 @@ class AgentState(TypedDict, total=False):
     error: str | None
 
 
+def _explain(exc: Exception) -> str:
+    """把 provider 的常见 4xx 翻译成可执行的提示;其它错误原样带出。"""
+    text = str(exc)
+    if "supported API model names" in text or "model_not_found" in text:
+        return f"{text}(提示:换成服务端支持的名字,如 deepseek:deepseek-flash)"
+    if "401" in text or "auth" in text.lower():
+        return f"{text}(提示:检查 DEEPSEEK_API_KEY)"
+    return text
+
+
 def build_graph(planner: Planner, max_turns: int = 6) -> Any:
     def plan_node(state: AgentState) -> dict[str, Any]:
         if state.get("turns", 0) >= max_turns:
@@ -40,7 +50,15 @@ def build_graph(planner: Planner, max_turns: int = 6) -> Any:
         try:
             plan = planner.plan(state.get("message", ""), list(state.get("history", [])))
         except Exception as exc:  # 规划失败也要变成可展示的信息
-            return {"error": f"规划失败:{exc}", "pending": None}
+            return {
+                "error": (
+                    f"规划失败:{exc}。"
+                    "常见原因:DID_AI_MODEL 不是服务端支持的模型名"
+                    "(deepseek-flash / deepseek-v4-pro),"
+                    "或 DEEPSEEK_API_KEY 无效。"
+                ),
+                "pending": None,
+            }
         if plan.tool is None:
             return {"final": plan.text or "我没有更多信息了。", "pending": None}
         try:
@@ -48,7 +66,15 @@ def build_graph(planner: Planner, max_turns: int = 6) -> Any:
         except PolicyError as exc:
             return {"error": str(exc), "pending": None}
         kind = "confirm" if TOOLS[plan.tool].kind == "write" else "read"
-        return {"pending": {"tool": plan.tool, "kind": kind, "args": redact(args)}, "final": None}
+        return {
+            "pending": {
+                "tool": plan.tool,
+                "kind": kind,
+                "args": redact(args),
+                "tool_call_id": plan.tool_call_id,
+            },
+            "final": None,
+        }
 
     def request_tool_node(state: AgentState) -> dict[str, Any]:
         pending = state["pending"]
@@ -63,7 +89,14 @@ def build_graph(planner: Planner, max_turns: int = 6) -> Any:
             }
         )
         history = list(state.get("history", []))
-        history.append({"tool": pending["tool"], "args": pending["args"], "result": decision})
+        history.append(
+            {
+                "tool": pending["tool"],
+                "args": pending["args"],
+                "tool_call_id": pending.get("tool_call_id"),
+                "result": decision,
+            }
+        )
         return {"history": history, "pending": None, "turns": state.get("turns", 0) + 1}
 
     def finish_node(state: AgentState) -> dict[str, Any]:

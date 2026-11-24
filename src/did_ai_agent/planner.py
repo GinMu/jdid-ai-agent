@@ -21,6 +21,8 @@ class Plan:
     tool: str | None = None
     args: dict[str, Any] | None = None
     text: str | None = None
+    # 模型给的 tool_call id:回放历史时 assistant(tool_calls) 与 tool 结果必须配对
+    tool_call_id: str | None = None
 
 
 class Planner:
@@ -46,23 +48,29 @@ class FakePlanner(Planner):
 
         if any(k in text for k in ("凭证", "credential")) or "credential" in lowered:
             if "list_credentials" not in already:
-                return Plan(tool="list_credentials", args={"limit": 20})
+                return Plan(
+                    tool="list_credentials", args={"limit": 20}, tool_call_id="fake-credentials"
+                )
             return Plan(text=self._summarize(history, "凭证"))
 
         if any(k in text for k in ("身份", "address", "地址")) or "identity" in lowered:
             if "get_identity" not in already:
-                return Plan(tool="get_identity", args={})
+                return Plan(tool="get_identity", args={}, tool_call_id="fake-identity")
             return Plan(text=self._summarize(history, "身份"))
 
         if "nft" in lowered:
             if "list_nfts" not in already:
-                return Plan(tool="list_nfts", args={"limit": 20})
+                return Plan(tool="list_nfts", args={"limit": 20}, tool_call_id="fake-nfts")
             return Plan(text=self._summarize(history, "NFT"))
 
         match = _DID_RE.search(text)
         if match:
             if "resolve_did" not in already:
-                return Plan(tool="resolve_did", args={"did": match.group(0)})
+                return Plan(
+                    tool="resolve_did",
+                    args={"did": match.group(0)},
+                    tool_call_id="fake-resolve",
+                )
             return Plan(text=self._summarize(history, "DID"))
 
         if any(k in text for k in ("签", "sign")):
@@ -70,6 +78,7 @@ class FakePlanner(Planner):
                 return Plan(
                     tool="propose_sign_message",
                     args={"message": text, "purpose": "用户请求"},
+                    tool_call_id="fake-sign",
                 )
             return Plan(text=self._summarize(history, "签名"))
 
@@ -130,7 +139,7 @@ class LangChainPlanner(Planner):
         return cls(model.bind_tools(tool_schemas()))
 
     def plan(self, message: str, history: list[dict[str, Any]]) -> Plan:
-        from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
         messages: list[Any] = [
             SystemMessage(
@@ -143,19 +152,39 @@ class LangChainPlanner(Planner):
             HumanMessage(content=message),
         ]
         for entry in history:
-            if entry.get("tool") and entry.get("result") is not None:
-                messages.append(
-                    ToolMessage(
-                        content=json.dumps(entry["result"], ensure_ascii=False),
-                        tool_call_id=entry.get("tool_call_id") or entry["tool"],
-                    )
+            if not (entry.get("tool") and entry.get("result") is not None):
+                continue
+            call_id = entry.get("tool_call_id") or entry["tool"]
+            # OpenAI 兼容端点要求:assistant(tool_calls) 必须在前,tool 结果紧跟其后
+            messages.append(
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": entry["tool"],
+                            "args": entry.get("args") or {},
+                            "id": call_id,
+                            "type": "tool_call",
+                        }
+                    ],
                 )
+            )
+            messages.append(
+                ToolMessage(
+                    content=json.dumps(entry["result"], ensure_ascii=False),
+                    tool_call_id=call_id,
+                )
+            )
 
         reply = self._model.invoke(messages)
         for call in getattr(reply, "tool_calls", []) or []:
             name = call.get("name")
             if name in self._tool_names:
-                return Plan(tool=name, args=call.get("args") or {})
+                return Plan(
+                    tool=name,
+                    args=call.get("args") or {},
+                    tool_call_id=call.get("id"),
+                )
         return Plan(text=str(reply.content))
 
 

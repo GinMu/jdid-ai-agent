@@ -17,7 +17,7 @@ TOOL_CALL_BODY = {
     "id": "chatcmpl-test",
     "object": "chat.completion",
     "created": 0,
-    "model": "deepseek-v4.1-flash",
+    "model": "deepseek-flash",
     "choices": [
         {
             "index": 0,
@@ -45,7 +45,7 @@ TEXT_BODY = {
     "id": "chatcmpl-test",
     "object": "chat.completion",
     "created": 0,
-    "model": "deepseek-v4.1-flash",
+    "model": "deepseek-flash",
     "choices": [
         {
             "index": 0,
@@ -59,12 +59,12 @@ TEXT_BODY = {
 
 @pytest.fixture
 def stub_model():
-    body = {"value": TOOL_CALL_BODY}
+    body = {"value": TOOL_CALL_BODY, "last_request": {}}
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("content-length", 0))
-            self.rfile.read(length)
+            body["last_request"] = json.loads(self.rfile.read(length) or b"{}")
             payload = json.dumps(body["value"]).encode()
             self.send_response(200)
             self.send_header("content-type", "application/json")
@@ -87,7 +87,7 @@ def stub_model():
 
 def _planner(base_url: str) -> LangChainPlanner:
     return LangChainPlanner.from_config(
-        "deepseek:deepseek-v4.1-flash", temperature=0, api_key="test-key", base_url=base_url
+        "deepseek:deepseek-flash", temperature=0, api_key="test-key", base_url=base_url
     )
 
 
@@ -115,3 +115,27 @@ def test_unknown_tool_name_from_model_is_ignored(stub_model):
     call["function"]["arguments"] = "{}"
     plan = _planner(base_url).plan("随便", [])
     assert plan.tool is None  # 白名单外的名字不会被采纳
+
+
+def test_history_is_replayed_as_assistant_tool_calls_then_tool_message(stub_model):
+    """OpenAI 兼容端点要求 assistant(tool_calls) 在前、tool 结果紧跟其后,否则 400。"""
+    base_url, body = stub_model
+    body["value"] = TEXT_BODY
+    history = [
+        {
+            "tool": "list_credentials",
+            "args": {"limit": 5},
+            "tool_call_id": "call_1",
+            "result": {"result": [{"type": "A"}]},
+        }
+    ]
+    plan = _planner(base_url).plan("这些凭证快过期吗?", history)
+    assert plan.tool is None
+
+    messages = body["last_request"]["messages"]
+    roles = [m["role"] for m in messages]
+    assert "assistant" in roles and "tool" in roles
+    assistant_index = roles.index("assistant")
+    assert messages[assistant_index]["tool_calls"][0]["id"] == "call_1"
+    assert roles[assistant_index + 1] == "tool"
+    assert messages[assistant_index + 1]["tool_call_id"] == "call_1"

@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     planner: str = "fake"  # fake | langchain
     # model 用 "<provider>:<model-id>":deepseek 走 langchain-deepseek
-    model: str = "deepseek:deepseek-v4.1-flash"
+    model: str = "deepseek:deepseek-flash"
     base_url: str = ""  # 留空 = 用 langchain-deepseek 的默认端点;本地桩测试才填
     api_key: str = ""  # 也从 DEEPSEEK_API_KEY 读(见下方 resolve_api_key)
     temperature: float = 0.0
