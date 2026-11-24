@@ -133,23 +133,23 @@ def test_unknown_tool_name_from_model_is_ignored(stub):
     assert plan.tool is None  # 白名单外的名字不会被采纳
 
 
-def test_history_is_replayed_as_assistant_tool_calls_then_tool_message(stub):
-    """OpenAI 兼容端点要求 assistant(tool_calls) 在前、tool 结果紧跟其后,否则 400。"""
+def test_tool_result_is_replayed_as_a_user_message(stub):
+    """工具结果以用户消息回放:避开 assistant(tool_calls) 配对与 reasoning_content 两条协议约束。"""
     base_url, state = stub
-    state["queue"] = [_text_stream("没问题")]
+    state["queue"] = [_text_stream("好的")]
     history = [
         {
             "tool": "list_credentials",
             "args": {"limit": 5},
             "tool_call_id": "call_1",
-            "result": {"result": [{"type": "A"}]},
+            "result": {"total": 7},
         }
     ]
-    _planner(base_url).plan("这些凭证快过期吗?", history)
+    _planner(base_url).plan("逐个验证", history)
 
     messages = state["requests"][-1]["messages"]
     roles = [m["role"] for m in messages]
-    assistant_index = roles.index("assistant")
-    assert messages[assistant_index]["tool_calls"][0]["id"] == "call_1"
-    assert roles[assistant_index + 1] == "tool"
-    assert messages[assistant_index + 1]["tool_call_id"] == "call_1"
+    assert "tool" not in roles, "不再发送 tool 角色消息"
+    last = messages[-1]
+    assert last["role"] == "user"
+    assert "list_credentials" in last["content"] and "7" in last["content"]
