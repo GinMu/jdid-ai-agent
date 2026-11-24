@@ -46,6 +46,56 @@ curl -s localhost:8099/healthz | jq     # planner 应显示 LangChainPlanner
 断言 `ChatDeepSeek` 的 tool_calls 能被解析成 `Plan`、白名单外的工具名会被丢弃 ——
 不需要 key、不打外网。
 
+## 代码导读(给第一次读的人)
+
+按这个顺序读,20 分钟能看懂整条链路:
+
+| 顺序 | 文件 | 看什么 |
+| --- | --- | --- |
+| 1 | `src/did_ai_agent/tools/registry.py` | 10 个工具的白名单。**服务端一个都不执行**,只描述"钱包能做什么" |
+| 2 | `src/did_ai_agent/planner.py` | `Plan` / `Delta` 两个数据类和两种规划器。真实模型的 `iter_plan()` 是"流式 + 工具调用"的核心 |
+| 3 | `src/did_ai_agent/graph.py` | 三个节点 `plan / request_tool / finish`。**看懂 `interrupt()` 就懂了一半** |
+| 4 | `src/did_ai_agent/app.py` | SSE 翻译层:把图的 `updates` 与 `custom` 两种流翻译成 4 种事件 |
+| 5 | `src/did_ai_agent/policy.py` | 白名单、参数校验、脱敏、限流 —— "AI 不能为所欲为"的落点 |
+
+每个文件顶部都有"这个文件在做什么"的注释;关键分支(interrupt、tool_calls 回放、流式拼接)也都写了行内注释。
+
+## 流式输出
+
+`POST /chat` 与 `/resume` 都是 SSE,文本是**逐段**推的:
+
+```text
+data: {"type":"text","text":"你"}
+data: {"type":"text","text":"目前"}
+data: {"type":"text","text":"有"}
+...
+data: {"type":"done"}
+```
+
+实现靠 LangGraph 的**自定义流**:节点里 `get_stream_writer()({type:"text",text:...})`,
+`app._run()` 同时订阅 `updates`(状态变化)与 `custom`(文本片段)。
+好处是:首字延迟从"等整段生成完"降到几百毫秒,而"要不要调工具"的决策仍然非流式、简单可靠。
+
+> 注意:`text` 事件可能很多条,客户端应做增量拼接;`done` 才是本轮结束。
+
+## 多步规划
+
+一句话可以连着调多个工具。图的边是 `request_tool → plan`,所以每拿到一个结果就重新判断一次:
+
+```text
+用户:帮我确认这几张凭证还有效吗
+  plan → list_credentials  ──(钱包执行)──►  plan
+  plan → verify_credential ──(钱包执行)──►  plan
+  plan → 直接回答
+```
+
+两道保险:
+
+| 保险 | 位置 |
+| --- | --- |
+| `max_turns`(默认 6) | `graph.plan_node` 开头:超过就收尾,防止模型绕圈 |
+| 策略校验 | 每次工具调用都要过 `validate_call`(白名单 + 参数 schema) |
+
 ## HTTP 契约
 
 ### `POST /chat`
@@ -86,6 +136,32 @@ curl -s localhost:8099/healthz | jq     # planner 应显示 LangChainPlanner
 | `verify_credential` | |
 | `list_nfts` | |
 | `get_dapp_grants` | |
+
+## 文档格式约定(避免 VSCode 告警)
+
+VSCode 的 `DavidAnson.vscode-markdownlint` 会读仓根的 [`.markdownlint.json`](.markdownlint.json),
+所以下面这几条是**硬约定**,不是个人偏好:
+
+| 规则 | 说明 |
+| --- | --- |
+| 表格分隔行写 `\| --- \| --- \|` | **不要**写 `\|---\|`;两种混用会报 `MD060/table-column-style` |
+| 代码块标注语言 | ` ```sh `/` ```json `/` ```text `,不要用裸 ` ``` ` 开场 |
+| 行尾不留空格 | 编辑器保存时可开 `trim trailing whitespace` |
+| 一个文件只有一个一级标题 | 且必须是第一行 |
+| `MD013`(行长)已关闭 | 表格和 URL 天然超长,不再为它折行 |
+| `MD060` 配成 `compact` | markdownlint 里 `compact` 的含义是"管道两侧要有空格"(即 `\| --- \|`);`tight` 才是无空格写法。VSCode 的 schema 只接受 `any/aligned/compact/tight`,写 `consistent` 会报"Value is not accepted" |
+
+自查(离线、秒级,不需要 Node):
+
+```sh
+uv run pytest tests/test_markdown_style.py -q
+```
+
+装过 markdownlint 的话也可以直接跑:
+
+```sh
+npx markdownlint-cli2 "*.md" "docs/**/*.md"
+```
 
 ## 开发
 
