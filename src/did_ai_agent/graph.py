@@ -75,11 +75,17 @@ def _stream_text(planner: Planner, message: str, history: list[dict[str, Any]]) 
     """
     writer = _text_writer()
     plan = None
+    emitted = False
     for delta in planner.iter_plan(message, history):
         if delta.text:
             writer({"type": "text", "text": delta.text})
+            emitted = True
         if delta.plan is not None:
             plan = delta.plan
+    # 模型在调工具前往往会先说一句(哪怕提示词已经禁止,也可能漏说);
+    # 这里补一个空行,保证"过渡语"和"最终答案"在气泡里分成两段,而不是粘成一行。
+    if emitted and plan is not None and plan.tool is not None:
+        writer({"type": "text", "text": "\n\n"})
     return plan
 
 
