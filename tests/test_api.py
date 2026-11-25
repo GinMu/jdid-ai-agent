@@ -21,7 +21,7 @@ def test_healthz_reports_fake_planner_and_tools():
     data = resp.json()
     assert data["ok"] is True
     assert data["planner"] == "FakePlanner"
-    assert data["tools"] == 10
+    assert data["tools"] == 11
 
 
 def test_chat_requests_a_read_tool_then_finishes():

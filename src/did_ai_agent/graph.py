@@ -25,6 +25,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from .knowledge import search_knowledge
 from .logging_setup import log_tool_result
 from .planner import Planner
 from .policy import PolicyError, redact, validate_call
@@ -116,6 +117,8 @@ def build_graph(planner: Planner, max_turns: int = 6) -> Any:
             "pending": {
                 "tool": plan.tool,
                 "kind": kind,
+                # 服务端本地工具(知识库)不需要钱包参与,由 request_tool 直接执行
+                "local": TOOLS[plan.tool].local,
                 # 审计/事件里只放脱敏后的参数(私钥类字段变 ***)
                 "args": redact(args),
                 "tool_call_id": plan.tool_call_id,
@@ -124,12 +127,38 @@ def build_graph(planner: Planner, max_turns: int = 6) -> Any:
         }
 
     def request_tool_node(state: AgentState) -> dict[str, Any]:
-        """把工具调用交给钱包,并在这里"挂起"等 resume。
+        """执行这次工具调用。
+
+        两条路:
+        - `local=True`(知识库检索):服务端直接跑,不挂起、不打扰钱包;
+        - 其余:交给钱包,并在这里"挂起"等 resume。
 
         注意:`interrupt()` 第二次被调用时(同一节点重放)会直接返回 resume 的值,
-        所以这个函数看起来"没写等待逻辑",实际等待由 LangGraph 处理。
+        所以这条分支看起来"没写等待逻辑",实际等待由 LangGraph 处理。
         """
         pending = state["pending"]
+        if pending.get("local"):
+            result = search_knowledge(
+                str(pending["args"].get("query", "")), int(pending["args"].get("top_k", 4))
+            )
+            log_tool_result(state.get("session_id", ""), pending["tool"], result)
+            # 模型只拿"素材正文":片段 id / 来源 / 分数留在日志里,
+            # 否则模型容易把检索元信息原样抄进回答(用户明确要求不要)
+            result = {
+                "total": result["total"],
+                "passages": [hit["text"] for hit in result["hits"]],
+            }
+            history = list(state.get("history", []))
+            history.append(
+                {
+                    "tool": pending["tool"],
+                    "args": pending["args"],
+                    "tool_call_id": pending.get("tool_call_id"),
+                    "result": result,
+                }
+            )
+            return {"history": history, "pending": None, "turns": state.get("turns", 0) + 1}
+
         # 注意:不要在这里打"工具请求"日志 —— 恢复时 LangGraph 会从头重跑本节点,
         # interrupt() 之前的副作用会执行两次。请求日志统一放在 app 层(那里只发一次事件)。
         decision = interrupt(

@@ -83,6 +83,27 @@ class FakePlanner(Planner):
         # 历史里已经调过哪些工具 —— 避免同一个工具被反复调用(死循环)
         already = {h.get("tool") for h in history if h.get("tool")}
 
+        # 知识库:问 did:swtc 方法本身(W3C 注册表 / 规范)时,先检索本地语料
+        if any(
+            k in text
+            for k in (
+                "did:swtc 方法",
+                "swtc 方法",
+                "did:ethr 方法",
+                "ethr",
+                "介绍",
+                "注册表",
+                "规范",
+            )
+        ):
+            if "query_knowledge" not in already:
+                return Plan(
+                    tool="query_knowledge",
+                    args={"query": text},
+                    tool_call_id="fake-knowledge",
+                )
+            return Plan(text=self._summarize(history, "资料"))
+
         if any(k in text for k in ("凭证", "credential")) or "credential" in lowered:
             if "list_credentials" not in already:
                 return Plan(

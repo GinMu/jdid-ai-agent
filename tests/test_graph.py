@@ -63,3 +63,20 @@ def test_interrupt_is_redacted():
     graph = build_graph(FakePlanner())
     payload = _interrupt_payload(_first_turn(graph, "g5", "看看我的凭证"))
     assert "privateKey" not in str(payload)
+
+
+def test_knowledge_tool_runs_on_the_server_without_asking_the_wallet():
+    """query_knowledge 是服务端本地工具:不产生 tool_request,也不等 resume。"""
+    graph = build_graph(FakePlanner())
+    cfg = {"configurable": {"thread_id": "local-tool-1"}}
+    body = {"session_id": "local-tool-1", "message": "介绍一下 did:swtc 方法", "turns": 0}
+    events = list(graph.stream(body, cfg, stream_mode="updates"))
+    # 一轮就把知识库检索跑完并给出回答:没有 __interrupt__
+    assert not any("__interrupt__" in event for event in events), events
+    state = graph.get_state(cfg).values
+    assert state["history"][0]["tool"] == "query_knowledge"
+    assert state["history"][0]["result"]["total"] >= 1
+    # 模型侧只该看到正文:不要 id/来源/分数,避免回答里罗列"命中"
+    assert "hits" not in state["history"][0]["result"]
+    assert state["history"][0]["result"]["passages"]
+    assert state.get("final")
