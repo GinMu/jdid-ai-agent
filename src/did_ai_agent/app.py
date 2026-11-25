@@ -23,6 +23,8 @@ from . import __version__
 from .audit import AuditLog
 from .config import get_settings
 from .graph import build_graph
+from .logging_setup import configure as configure_logging
+from .logging_setup import log_chat, log_resume, log_tool_request
 from .planner import build_planner
 from .policy import PolicyError, RateLimiter
 from .protocol import ChatRequest, Event, ResumeRequest
@@ -34,6 +36,8 @@ planner = build_planner(settings)  # 默认 FakePlanner;配了模型才是 LangC
 graph = build_graph(planner, max_turns=settings.max_turns)
 audit = AuditLog(settings.audit_size)  # 内存环形缓冲,只记事件/工具,不记原文
 limiter = RateLimiter(settings.rate_limit_per_min)
+
+LOG_FILE = configure_logging()
 
 app = FastAPI(title="JDID AI Agent", version=__version__)
 
@@ -63,6 +67,13 @@ def _translate(chunk: dict[str, Any], session_id: str) -> Iterator[Event]:
                 "tool_request",
                 tool=payload.get("tool"),
                 detail={"kind": payload.get("kind")},
+            )
+            # 每次挂起只打一次(这个分支对应 SSE 的 tool_request 事件)
+            log_tool_request(
+                session_id,
+                str(payload.get("tool")),
+                payload.get("args"),
+                str(payload.get("kind")),
             )
             yield Event(
                 type="tool_request",
@@ -131,6 +142,7 @@ def healthz() -> dict[str, Any]:
         "planner": type(planner).__name__,
         "tools": len(TOOLS),
         "model": settings.model or None,
+        "logFile": str(LOG_FILE),
     }
 
 
@@ -148,6 +160,7 @@ def chat(req: ChatRequest) -> StreamingResponse:
     """用户说一句话。可能直接回答,也可能要求钱包执行一个工具。"""
     limiter.check(req.session_id)
     audit.record(req.session_id, "chat", detail={"chars": len(req.message)})
+    log_chat(req.session_id, len(req.message))
     body = {"session_id": req.session_id, "message": req.message, "turns": 0, "pending": None}
     return StreamingResponse(
         (_sse(e) for e in _run(body, req.session_id)), media_type="text/event-stream"
@@ -167,6 +180,8 @@ def resume(req: ResumeRequest) -> StreamingResponse:
         # 读操作:直接回传数据
         decision = {"result": req.result}
     audit.record(req.session_id, "resume", detail={"approved": req.approved})
+    # 把钱包回传的内容完整记下来(排查"模型看到了什么"最直接的一条)
+    log_resume(req.session_id, decision)
     return StreamingResponse(
         (_sse(e) for e in _run(Command(resume=decision), req.session_id)),
         media_type="text/event-stream",

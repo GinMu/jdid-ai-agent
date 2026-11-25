@@ -25,6 +25,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from .logging_setup import log_tool_result
 from .planner import Planner
 from .policy import PolicyError, redact, validate_call
 from .tools.registry import TOOLS
@@ -129,6 +130,8 @@ def build_graph(planner: Planner, max_turns: int = 6) -> Any:
         所以这个函数看起来"没写等待逻辑",实际等待由 LangGraph 处理。
         """
         pending = state["pending"]
+        # 注意:不要在这里打"工具请求"日志 —— 恢复时 LangGraph 会从头重跑本节点,
+        # interrupt() 之前的副作用会执行两次。请求日志统一放在 app 层(那里只发一次事件)。
         decision = interrupt(
             {
                 "tool": pending["tool"],
@@ -140,6 +143,8 @@ def build_graph(planner: Planner, max_turns: int = 6) -> Any:
             }
         )
         # 把这次调用的结果记进历史 —— 下一轮 plan 就能看到它,从而实现多步规划
+        # 日志:钱包回来了什么(摘要;过长会截断)
+        log_tool_result(state.get("session_id", ""), pending["tool"], decision)
         history = list(state.get("history", []))
         history.append(
             {

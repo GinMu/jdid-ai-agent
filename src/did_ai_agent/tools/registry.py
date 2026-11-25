@@ -38,14 +38,29 @@ READ_TOOLS: tuple[Tool, ...] = (
     Tool(
         name="list_credentials",
         kind="read",
-        description="列出凭证摘要(类型、发行方、是否过期)。不含凭证原文与签名。",
-        params=_obj({"limit": {"type": "integer", "minimum": 1, "maximum": 50}}),
+        description=(
+            "列出凭证摘要(类型、发行方、是否过期),不含凭证原文与签名。"
+            "默认读当前身份的 DID 文档;用户给了某个 did 时把它作为 did 传入,"
+            "就会读那个 DID 的文档(公开数据)。"
+        ),
+        params=_obj(
+            {
+                "did": {"type": "string", "description": "可选:要查的 DID,例如 did:swtc:j…"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+            }
+        ),
     ),
     Tool(
         name="get_credential",
         kind="read",
-        description="按 id 取一张凭证的**摘要**(不返回原文)。",
-        params=_obj({"credential_id": {"type": "string"}}, required=["credential_id"]),
+        description="按 id 取一张凭证的**摘要**(不返回原文)。默认在当前身份里找;给了 did 就在那个 DID 的文档里找。",
+        params=_obj(
+            {
+                "credential_id": {"type": "string"},
+                "did": {"type": "string", "description": "可选:在哪个 DID 的文档里找"},
+            },
+            required=["credential_id"],
+        ),
     ),
     Tool(
         name="resolve_did",
@@ -56,8 +71,14 @@ READ_TOOLS: tuple[Tool, ...] = (
     Tool(
         name="verify_credential",
         kind="read",
-        description="验证一张凭证是否有效(只读)。",
-        params=_obj({"credential_id": {"type": "string"}}, required=["credential_id"]),
+        description="验证一张凭证是否有效(只读)。默认在当前身份里找;给了 did 就在那个 DID 的文档里找。",
+        params=_obj(
+            {
+                "credential_id": {"type": "string"},
+                "did": {"type": "string", "description": "可选:在哪个 DID 的文档里找"},
+            },
+            required=["credential_id"],
+        ),
     ),
     Tool(
         name="list_nfts",
