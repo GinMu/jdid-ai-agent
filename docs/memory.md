@@ -299,3 +299,19 @@ system prompt                         ← 永不丢
 
 相关设计见 [`docs/long-term-memory.md`](long-term-memory.md) 第 11–12 节(记忆更新与裁决)与
 [`docs/summarization.md`](summarization.md)(超预算时的压缩)。
+
+## 12. 设计问答:记忆的存储、更新与遗忘
+
+这个问题在 [`docs/long-term-memory.md`](long-term-memory.md) 第 11–13 节有完整答案,
+这里只给结论与现状对照,避免两处漂移。
+
+| 子问题 | 结论 | 现状 |
+| --- | --- | --- |
+| 短期记忆存哪 | LangGraph `AgentState.history` + `MemorySaver`,按 `thread_id` 隔离 | 已实现 |
+| 长期记忆存哪 | **优先钱包本地**(`SessionStore`);服务端只存摘要 | `TODO`(M9) |
+| 怎么更新 | 唯一真值覆盖 + 版本;事件只追加;会过期的事实带 TTL;推断冗余+衰减 | `TODO` |
+| 怎么遗忘 | 显式删除(tombstone)、TTL、LRU 淘汰会话 | `TODO`(M7) |
+| 历史与当前会话冲突 | 裁决顺序:安全约束 > 当前指令 > 显式记忆 > 工具实测 > 旧结论 > 推断;冲突记忆**不进本轮上下文** | 规则已定(第 9 节),实现 `TODO` |
+| 记忆与工具实测冲突 | 以工具实测为准,并回写记忆(缓存失效) | `TODO` |
+
+一句话:**规则已经写死,实现还没做**;做的时候按第 9 节的删减顺序与 long-term-memory 第 12 节的裁决链落地即可。
