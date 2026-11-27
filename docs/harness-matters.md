@@ -189,7 +189,8 @@ Anthropic 的 [Building effective agents](https://www.anthropic.com/research/har
 | 安全 | 越权率、敏感信息泄漏率 | 注入回归(见 `docs/prompt-injection.md`) |
 | 成本 | 每任务 token、每次工具调用成本 | 需先做 `TODO` 的计量 |
 
-**没有用户反馈时怎么抽检**:按"风险 × 频率"分层抽样 ——
+**没有用户反馈时怎么抽检**:按"风险 × 频率"分层抽样(完整流程、指标与业界方案见
+[`docs/evaluation-observability.md`](evaluation-observability.md))——
 
 | 分层 | 抽样比例 | 为什么 |
 | --- | --- | --- |

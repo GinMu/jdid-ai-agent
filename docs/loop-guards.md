@@ -80,6 +80,9 @@ curl -s localhost:8099/audit | python3 -m json.tool | less
 
 ### 4.3 关键字段怎么读
 
+> 这里只讲"用日志排查";完整的指标、trace 与评测体系见
+> [`docs/evaluation-observability.md`](evaluation-observability.md)。
+
 | 字段 | 含义 | 读法 |
 | --- | --- | --- |
 | `session` | 会话 id(UUID) | 一个用户对话一个值;多条交织说明并发或重放 |
